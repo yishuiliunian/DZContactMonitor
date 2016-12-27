@@ -6,4 +6,9 @@
 
 
 @interface DZAddressPeople : NSObject
+@property  (nonatomic, strong) NSString * identifier;
+@property  (nonatomic, strong) NSString * name;
+@property  (nonatomic, strong) NSArray<NSString*> * phoneNumbers;
+@property  (nonatomic, strong) NSString * userID;
+@property  (nonatomic, assign) BOOL firend;
 @end

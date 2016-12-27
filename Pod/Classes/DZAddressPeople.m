@@ -5,7 +5,10 @@
 #import "DZAddressPeople.h"
 
 
-@implementation DZAddressPeople {
+@implementation DZAddressPeople
 
+- (BOOL)isEqual:(DZAddressPeople *)object {
+    if  (![object isKindOfClass:[self class]]) return  NO;
+    return [object.identifier isEqualToString:self.identifier];
 }
 @end

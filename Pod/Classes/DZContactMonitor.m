@@ -7,15 +7,20 @@
 #import "DZAccountFileCache.h"
 #import "DZCacheArrayModelCodec.h"
 #import "DZAddressPeople.h"
-#import "DDLegacyMacros.h"
-#import "DDLogMacros.h"
+#import "YHContactStateRequest.h"
+#import "DZAuthSession.h"
+#import "DZCacheKeyModelCodec.h"
 #import <DZLogger/DZLogger.h>
-
 #import <Contacts/Contacts.h>
-
+#import <YHCommonCache.h>
+#import "DZCacheKeyModelCodec.h"
 @interface  DZContactMonitor ()
+{
+    NSRecursiveLock * _lock;
+}
 @property  (nonatomic, strong) DZFileCache * fileCache;
 @property  (nonatomic, strong, readonly) CNContactStore * contactStore;
+@property  (nonatomic, strong, readonly) YHObserverContainer * observerContainer;
 @end
 @implementation DZContactMonitor
 
@@ -29,41 +34,142 @@
     if (!self) {
         return self;
     }
-    _fileCache = [[DZAccountFileCache activeCache] fileCacheWithName:@"local-contacts" codec:[[DZCacheArrayModelCodec alloc] initWithContainerClass:[DZAddressPeople class]];
-    _contactStore = [[CNContactStore alloc] init]];
+    _observerContainer = [YHObserverContainer new];
+    _fileCache = [[DZAccountFileCache activeCache] fileCacheWithName:@"local-contacts" codec:[[DZCacheKeyModelCodec alloc] initWithModelClass:[DZAddressPeople class]]];
+    _contactStore = [[CNContactStore alloc] init];
+    _lock = [NSRecursiveLock new];
     [self ensureAcess];
     return self;
 }
 
 - (void)ensureAcess
 {
-   CNAuthorizationStatus status = [CNContactStore authorizationStatusForEntityType:CNEntityTypeContacts]
+   CNAuthorizationStatus status = [CNContactStore authorizationStatusForEntityType:CNEntityTypeContacts];
    __weak  typeof(self) weakSelf = self;
    switch (status) {
        case CNAuthorizationStatusAuthorized:
-           [self loadSystemContacts];
+           [self asyncLoadSystemContacts];
            break;
        default:
            [self.contactStore requestAccessForEntityType:CNEntityTypeContacts completionHandler:^(BOOL granted, NSError *error) {
-               [weakSelf loadSystemContacts];
+               [weakSelf asyncLoadSystemContacts];
            }];
    }
 }
+
+- (void) asyncLoadSystemContacts
+{
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH,0) , ^{
+        [self loadSystemContacts];
+    });
+}
+
 - (void) loadSystemContacts
 {
     NSArray * keysToFetch = @[
             CNContactImageDataKey,
             CNContactPhoneNumbersKey,
-            CNContactGivenNameKey
+            CNContactGivenNameKey,
+            CNContactMiddleNameKey,
+            CNContactFamilyNameKey,
+            CNContactNicknameKey,
+            CNContactPhoneNumbersKey,
+            CNContactEmailAddressesKey
     ];
     CNContactFetchRequest * request = [[CNContactFetchRequest alloc] initWithKeysToFetch:keysToFetch];
 
+    NSDictionary* olderContacts = [_fileCache.lastCachedObject copy];
+    NSArray* olderIndexs = olderContacts.allKeys;
+    NSMutableArray * comingContacts = [NSMutableArray new];
     [self.contactStore enumerateContactsWithFetchRequest:request error:Nil usingBlock:^(CNContact *contact, BOOL *stop) {
-        NSLog(@"user %@",contact);
+        if (![olderIndexs containsObject:contact.identifier]) {
+            DZAddressPeople * people = [DZAddressPeople new];
+            people.identifier = contact.identifier;
+            people.name = contact.nickname.length?contact.nickname:[NSString stringWithFormat:@"%@%@%@",contact.familyName,contact.middleName,contact.givenName];
+            NSMutableArray * numbers = [NSMutableArray new];
+            for (CNLabeledValue * number in contact.phoneNumbers) {
+                if ([number.value isKindOfClass:[CNPhoneNumber class]]) {
+                    CNPhoneNumber * phoneNumber = number.value;
+                    NSString * phone = [number.value stringValue];
+                    phone = [phone stringByReplacingOccurrencesOfString:@"-" withString:@""];
+                    if (phone.length >= 11) {
+                        [numbers addObject:[phone substringFromIndex:phone.length-11]];
+                    }
+                }
+            }
+            people.phoneNumbers = numbers;
+            people.userID = nil;
+            people.firend = NO;
+            if (people.phoneNumbers.count) {
+                [comingContacts addObject:people];
+            }
+        }
     }];
-
-    NSLog(@"end...");
-
+    [self syncStatus:comingContacts];
 }
 
+- (void) syncStatus:(NSArray *)contacts
+{
+    if (contacts.count < 1) {
+        return;
+    }
+    NSArray * willSyncContacts = nil;
+    int maxLength = 40;
+    if (contacts.count > maxLength) {
+        willSyncContacts = [contacts subarrayWithRange:NSMakeRange(0, maxLength)];
+        contacts = [contacts subarrayWithRange:NSMakeRange(maxLength,contacts.count-maxLength)];
+    } else {
+        willSyncContacts = [contacts copy];
+        contacts = nil;
+    }
+
+    YHContactStateRequest * req = [YHContactStateRequest new];
+    NSMutableArray * array = [NSMutableArray new];
+    NSMutableDictionary * map = [NSMutableDictionary new];
+    for (DZAddressPeople * people in willSyncContacts) {
+        for (NSString * number in people.phoneNumbers) {
+            [array addObject:number];
+            if (people.identifier) {
+                map[number] = people;
+            }
+        }
+    }
+    [array addObject:@"13429521443"];
+    req.query.mobileNoArray = array;
+    req.skey = DZActiveAuthSession.token;
+
+    __weak  typeof(self) weakSelf = self;
+    [req setErrorHandler:^(NSError *error) {
+
+    }];
+
+    [req setSuccessHanlder:^(QueryAddressBookResponse* object) {
+        NSMutableArray * changedPeople = [NSMutableArray new];
+        for (AddressBook * book in object.addressBookArray) {
+            DZAddressPeople * people = map[book.mobileNo];
+            people.userID = book.userName;
+            people.firend = book.isFriend;
+            if (people) {
+                [changedPeople addObject:people];
+            }
+        }
+        [weakSelf updateWithServerModel:willSyncContacts];
+        [weakSelf syncStatus:contacts];
+    }];
+
+    [req start];
+}
+
+- (void) updateWithServerModel:(NSArray *)models
+{
+    NSMutableDictionary* dictionary= [_fileCache.lastCachedObject mutableCopy];
+    for(DZAddressPeople * people in models) {
+        dictionary[people.identifier] = people;
+    }
+    _fileCache.lastCachedObject = dictionary;
+}
+
+- (void)registerObserver:(id <DZContactsObserver>)observer {
+    [self.observerContainer addDefaultObserver:observer];
+}
 @end
