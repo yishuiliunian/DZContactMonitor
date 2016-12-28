@@ -6,6 +6,7 @@
 //
 //
 
+#import <DZAlertPool/DZAlertPool.h>
 #import "YHAddressBookPeopleElement.h"
 #import "YHAddressBookCell.h"
 #import "DZAddressPeople.h"
@@ -14,8 +15,13 @@
 #import "YHUtils.h"
 #import "YHImageURLAdapter.h"
 #import "YHCommonCache.h"
+#import "YHButtonAppearance.h"
+#import "YHAddContactReqeust.h"
+#import "DZAuthSession.h"
+#import "YHContactsManager.h"
+#import <MessageUI/MessageUI.h>
 
-@interface YHAddressBookPeopleElement () <YHCacheFetcherObsever>
+@interface YHAddressBookPeopleElement () <YHCacheFetcherObsever, MFMessageComposeViewControllerDelegate>
 {
     UserProfile * _userProfile;
 }
@@ -57,7 +63,8 @@
     SUPER_COMMON_CACHE(modelId, model);
     if ([modelId isEqualToString:_people.userID] && [model isKindOfClass:[UserProfile class]]) {
         UserProfile * profile = (UserProfile *)model;
-
+        self.activeCell.nickLabel.text = profile.readNick;
+        [self.activeCell.avatarView loadAvatarURL:DZ_STR_2_URL(profile.faceURL)];
     }
 }
 
@@ -71,7 +78,7 @@
             [responser.avatarView loadAvatarURL:DZ_STR_2_URL(_userProfile.faceURL)];
         } else {
             NSString * key = [NSString stringWithFormat:@"https://%@",_people.identifier];
-            [responser.avatarView hnk_setImageFromURL:[NSURL URLWithString:key]];
+            [responser.avatarView loadAvatarURL:[NSURL URLWithString:key]];
             responser.nickLabel.text = _people.name;
             [[YHCommonCache shareCache] fetchUserProfile:_people.userID observer:self];
         }
@@ -80,15 +87,90 @@
         [responser.avatarView hnk_setImageFromURL:[NSURL URLWithString:key]];
         responser.nickLabel.text = _people.name;
     }
+    [self decorateWithState];
+    [responser.actionButton addTarget:self action:@selector(handleAction) forControlEvents:UIControlEventTouchUpInside];
+}
 
+- (void) decorateWithState
+{
     if (_people.firend) {
-        responser.indicatorLabel.text = [NSString stringWithFormat:@"已经是哟呵好友:%@", _people.phoneNumbers.firstObject];
+        self.activeCell.indicatorLabel.text = [NSString stringWithFormat:@"已经是哟呵好友:%@", _people.phoneNumbers.firstObject];
+        DZButtonStyle * style = DZStyleWhiteButton();
+        style.disabledStyle.titleColor = [UIColor lightGrayColor];
+        [style decorateView:self.activeCell.actionButton];
+        [self.activeCell.actionButton setTitle:@"已添加" forState:UIControlStateNormal];
+        self.activeCell.actionButton.enabled = NO;
     } else if (_people.userID.length) {
-        responser.indicatorLabel.text = [NSString stringWithFormat:@"手机联系人:%@", _people.phoneNumbers.firstObject];
+        self.activeCell.indicatorLabel.text = [NSString stringWithFormat:@"手机联系人:%@", _people.phoneNumbers.firstObject];
+        self.activeCell.actionButton.enabled = YES;
+        [DZStyleBlueButton() decorateView:self.activeCell.actionButton];
+        [self.activeCell.actionButton setTitle:@"关注" forState:UIControlStateNormal];
     } else {
-        responser.indicatorLabel.text = [NSString stringWithFormat:@"手机联系人:%@", _people.phoneNumbers.firstObject];
+        self.activeCell.indicatorLabel.text = [NSString stringWithFormat:@"手机联系人:%@", _people.phoneNumbers.firstObject];
+        self.activeCell.actionButton.enabled = YES;
+        [self.activeCell.actionButton setTitle:@"邀请" forState:UIControlStateNormal];
+        [DZStyleBlueButton() decorateView:self.activeCell.actionButton];
     }
 
+}
 
+- (void)willRegsinHandleResponser:(YHAddressBookCell*)responser {
+    [super willRegsinHandleResponser:responser];
+}
+
+- (void) handleAction
+{
+    if (!_people.firend) {
+        if (_people.userID) {
+            [self firendWithThisMan];
+        } else {
+            [self inviteThisMan];
+        }
+    }
+}
+
+- (void) inviteThisMan
+{
+    if (![MFMessageComposeViewController canSendText]) {
+        DZAlertHUDShowStatus(@"请配置短信，之后发送邀请");
+    } else {
+        MFMessageComposeViewController * mfm = [MFMessageComposeViewController new];
+        mfm.recipients = _people.phoneNumbers;
+        mfm.body = @"校园里面的事情都在这里，下载哟呵校园开启新生活：https://xxxxxxxxx";
+        mfm.messageComposeDelegate = self;
+        mfm.navigationController.navigationBar.titleTextAttributes  = @{
+               NSForegroundColorAttributeName : [UIColor blackColor]
+        };
+        [self.hostViewController presentViewController:mfm animated:YES completion:^{
+
+        }];
+    }
+}
+
+- (void) firendWithThisMan
+{
+    __weak typeof(self) weakSelf = self;
+    YHAddContactReqeust* req = [YHAddContactReqeust new];
+    req.addContanct.contactUserName = _people.userID;
+    req.skey = DZActiveAuthSession.token;
+
+    __weak typeof(req) weakReq= req;
+    [req setErrorHandler:^(NSError * error) {
+        DZAlertShowError(error.localizedDescription);
+    }];
+
+    [req setSuccessHanlder:^(id object) {
+        weakSelf.people.firend = YES;
+        [weakSelf decorateWithState];
+        [[YHContactsManager shareManager] addContact:weakReq.addContanct.contactUserName];
+    }];
+    [req start];
+}
+
+
+- (void)messageComposeViewController:(MFMessageComposeViewController *)controller didFinishWithResult:(MessageComposeResult)result {
+    [controller dismissViewControllerAnimated:YES completion:^{
+
+    }];
 }
 @end

@@ -6,6 +6,7 @@
 //
 //
 
+#import <DZAlertPool/DZAlertPool.h>
 #import "YHAddressBookTableElement.h"
 #import "EKAdjustCellElement.h"
 #import "DZContactMonitor.h"
@@ -19,10 +20,35 @@
 
 + (void)load {
     [[DZURLRoute defaultRoute] addRoutePattern:kYHURLShowAddressContacts handler:^DZURLRouteResponse *(DZURLRouteRequest *request) {
-        YHAddressBookTableElement * ele = [YHAddressBookTableElement new];
-        EKTableViewController * tableVC = [[EKTableViewController alloc] initWithElement:ele];
-        tableVC.hidesBottomBarWhenPushed = YES;
-        [request.context.topNavigationController pushViewController:tableVC animated:YES];
+
+        void (^Action)() = ^{
+            YHAddressBookTableElement * ele = [YHAddressBookTableElement new];
+            EKTableViewController * tableVC = [[EKTableViewController alloc] initWithElement:ele];
+
+            [tableVC registerLifeCircleAction:[DZVCOnceLifeCircleAction actionWithOnceBlock:^(UIViewController *vc, BOOL animated) {
+                [[DZContactMonitor userMonitor] asyncLoadSystemContacts];
+            }]];
+            tableVC.title = @"手机联系人";
+            tableVC.hidesBottomBarWhenPushed = YES;
+            [request.context.topNavigationController pushViewController:tableVC animated:YES];
+        };
+            CNAuthorizationStatus status = [CNContactStore authorizationStatusForEntityType:CNEntityTypeContacts];
+            __weak  typeof(self) weakSelf = self;
+            switch (status) {
+                case CNAuthorizationStatusAuthorized:
+                    Action();
+                    break;
+                default:
+                    [[DZContactMonitor userMonitor].contactStore requestAccessForEntityType:CNEntityTypeContacts completionHandler:^(BOOL granted, NSError *error) {
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            if (granted) {
+                                Action();
+                            } else {
+                                DZAlertShowError(@"请授权之后查看手机联系人");
+                            }
+                        });
+                    }];
+            }
         return [DZURLRouteResponse successResponse];
     }];
 }
@@ -34,7 +60,12 @@
     return self;
 }
 - (void)contactMonitor:(DZContactMonitor *)monitor receiveChangedStates:(NSArray *)changedContacts {
-    [self reloadData];
+
+}
+
+- (void)willBeginHandleResponser:(UIResponder *)responser {
+    [super willBeginHandleResponser:responser];
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
 }
 
 - (void)reloadData {
@@ -46,6 +77,18 @@
     }
     [_dataController clean];
     [_dataController updateObjects:eles];
+    [_dataController sortUseBlock:^NSComparisonResult(id obj1, id obj2) {
+        return [obj1 compare:obj2];
+    }];
     [self.tableView reloadData];
+}
+
+- (void)contactMonitorStartSync:(DZContactMonitor *)monitor {
+    DZAlertShowLoading(nil);
+}
+
+- (void)contactMonitorEndSync:(DZContactMonitor *)monitor {
+    [self reloadData];
+    DZAlertHideLoading;
 }
 @end

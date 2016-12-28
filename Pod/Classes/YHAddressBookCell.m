@@ -23,13 +23,16 @@
     INIT_SUBVIEW_UILabel(self.contentView, _nickLabel);
     INIT_SUBVIEW_UILabel(self.contentView, _indicatorLabel);
     _avatarView.hnk_cacheFormat = LTHanekeCacheFormatAvatar();
+    _indicatorLabel.textColor = [UIColor lightGrayColor];
+    _nickLabel.font = DZFontCellTitle();
+    _indicatorLabel.font = DZFontCellDetail();
     return self;
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect contentRect = CGRectCenterSubSize(self.contentView.bounds, CGSizeMake(30, 16));
-    CGSize buttonSize = {100, 30};
+    CGSize buttonSize = {70, 30};
     CGFloat  avatarHeight = (CGRectGetHeight(contentRect));
     CGSize avatarSize = {avatarHeight, avatarHeight};
     CGRect avatarR;
@@ -44,6 +47,7 @@
     CGRectDivide(contentRect, &buttonR, &contentRect, buttonSize.width, CGRectMaxXEdge);
     buttonR = CGRectCenter(buttonR, buttonSize);
 
+    contentRect = CGRectCenterSubSize(contentRect, CGSizeMake(20,0));
     CGRect labelRs[2];
     CGRectVerticalSplit(contentRect, labelRs, 2, 2);
 

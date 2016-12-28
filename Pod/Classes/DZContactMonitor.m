@@ -24,7 +24,7 @@
     NSRecursiveLock * _lock;
 }
 @property  (nonatomic, strong) DZFileCache * fileCache;
-@property  (nonatomic, strong, readonly) CNContactStore * contactStore;
+
 @property  (nonatomic, strong, readonly) YHObserverContainer * observerContainer;
 @end
 @implementation DZContactMonitor
@@ -43,29 +43,38 @@
     _fileCache = [[DZAccountFileCache activeCache] fileCacheWithName:@"local-contacts" codec:[[DZCacheKeyModelCodec alloc] initWithModelClass:[DZAddressPeople class]]];
     _contactStore = [[CNContactStore alloc] init];
     _lock = [NSRecursiveLock new];
-    [self ensureAcess];
     return self;
 }
 
-- (void)ensureAcess
+
+- (void) startSync
 {
-   CNAuthorizationStatus status = [CNContactStore authorizationStatusForEntityType:CNEntityTypeContacts];
-   __weak  typeof(self) weakSelf = self;
-   switch (status) {
-       case CNAuthorizationStatusAuthorized:
-           [self asyncLoadSystemContacts];
-           break;
-       default:
-           [self.contactStore requestAccessForEntityType:CNEntityTypeContacts completionHandler:^(BOOL granted, NSError *error) {
-               [weakSelf asyncLoadSystemContacts];
-           }];
-   }
+    NSArray * observers = [_observerContainer allDefaultObservers];
+    for (NSObject <DZContactsObserver>* ob in observers) {
+        if ([ob respondsToSelector:@selector(contactMonitorStartSync:)]) {
+            [ob contactMonitorStartSync:self];
+        }
+    }
 }
 
+
+- (void) endSync
+{
+    NSArray * observers = [_observerContainer allDefaultObservers];
+    for (NSObject <DZContactsObserver>* ob in observers) {
+        if ([ob respondsToSelector:@selector(contactMonitorEndSync:)]) {
+            [ob contactMonitorEndSync:self];
+        }
+    }
+    [_fileCache flush:nil];
+}
 - (void) asyncLoadSystemContacts
 {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH,0) , ^{
         [self loadSystemContacts];
+        dispatch_async(dispatch_get_main_queue(), ^{
+           [self startSync];
+        });
     });
 }
 
@@ -89,6 +98,14 @@
     NSMutableDictionary * contacts = [NSMutableDictionary new];
     [contacts addEntriesFromDictionary:olderContacts];
     [self.contactStore enumerateContactsWithFetchRequest:request error:Nil usingBlock:^(CNContact *contact, BOOL *stop) {
+        NSData * data = [contact thumbnailImageData];
+        if (data) {
+            UIImage * image = [UIImage imageWithData:data];
+            if (image) {
+                NSString * key = [NSString stringWithFormat:@"https://%@",contact.identifier];
+                [[HNKCache sharedCache] setImage:image forKey:key formatName:LTHanekeCacheFormatAvatar().name];
+            }
+        }
         if (![olderIndexs containsObject:contact.identifier]) {
             DZAddressPeople * people = [DZAddressPeople new];
             people.identifier = contact.identifier;
@@ -108,14 +125,7 @@
             people.userID = nil;
             people.firend = NO;
 
-            NSData * data = [contact thumbnailImageData];
-            if (data) {
-                UIImage * image = [UIImage imageWithData:data];
-                if (image) {
-                    NSString * key = [NSString stringWithFormat:@"https://%@",people.identifier];
-                    [[HNKCache sharedCache] setImage:image forKey:key formatName:LTHanekeCacheFormatAvatar().name];
-                }
-            }
+
             if (people.phoneNumbers.count) {
                 [comingContacts addObject:people];
                 contacts[people.identifier] = people;
@@ -134,6 +144,9 @@
 - (void) syncStatus:(NSArray *)contacts
 {
     if (contacts.count < 1) {
+        dispatch_async(dispatch_get_main_queue(), ^ {
+            [self endSync];
+        });
         return;
     }
     NSArray * willSyncContacts = nil;
@@ -163,7 +176,7 @@
 
     __weak  typeof(self) weakSelf = self;
     [req setErrorHandler:^(NSError *error) {
-
+        [weakSelf endSync];
     }];
 
     [req setSuccessHanlder:^(QueryAddressBookResponse* object) {
