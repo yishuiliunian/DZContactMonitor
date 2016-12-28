@@ -185,7 +185,8 @@
 
 - (void) updateWithServerModel:(NSArray *)models
 {
-    NSMutableDictionary* dictionary= [_fileCache.cachedDictionary mutableCopy];
+    NSMutableDictionary* dictionary= [NSMutableDictionary new];
+    [dictionary addEntriesFromDictionary:_fileCache.lastCachedObject];
     for(DZAddressPeople * people in models) {
         dictionary[people.identifier] = people;
     }
