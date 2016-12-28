@@ -13,7 +13,12 @@
 #import <DZLogger/DZLogger.h>
 #import <Contacts/Contacts.h>
 #import <YHCommonCache.h>
+#import <Bugly/Bugly/Bugly.h>
 #import "DZCacheKeyModelCodec.h"
+#import "EKAdjustTableElement.h"
+#import "HNKCache.h"
+#import "YHImageURLAdapter.h"
+
 @interface  DZContactMonitor ()
 {
     NSRecursiveLock * _lock;
@@ -67,7 +72,7 @@
 - (void) loadSystemContacts
 {
     NSArray * keysToFetch = @[
-            CNContactImageDataKey,
+            CNContactThumbnailImageDataKey,
             CNContactPhoneNumbersKey,
             CNContactGivenNameKey,
             CNContactMiddleNameKey,
@@ -78,9 +83,11 @@
     ];
     CNContactFetchRequest * request = [[CNContactFetchRequest alloc] initWithKeysToFetch:keysToFetch];
 
-    NSDictionary* olderContacts = [_fileCache.lastCachedObject copy];
+    NSDictionary* olderContacts = [_fileCache.cachedDictionary copy];
     NSArray* olderIndexs = olderContacts.allKeys;
     NSMutableArray * comingContacts = [NSMutableArray new];
+    NSMutableDictionary * contacts = [NSMutableDictionary new];
+    [contacts addEntriesFromDictionary:olderContacts];
     [self.contactStore enumerateContactsWithFetchRequest:request error:Nil usingBlock:^(CNContact *contact, BOOL *stop) {
         if (![olderIndexs containsObject:contact.identifier]) {
             DZAddressPeople * people = [DZAddressPeople new];
@@ -100,11 +107,27 @@
             people.phoneNumbers = numbers;
             people.userID = nil;
             people.firend = NO;
+
+            NSData * data = [contact thumbnailImageData];
+            if (data) {
+                UIImage * image = [UIImage imageWithData:data];
+                if (image) {
+                    NSString * key = [NSString stringWithFormat:@"https://%@",people.identifier];
+                    [[HNKCache sharedCache] setImage:image forKey:key formatName:LTHanekeCacheFormatAvatar().name];
+                }
+            }
             if (people.phoneNumbers.count) {
                 [comingContacts addObject:people];
+                contacts[people.identifier] = people;
+            }
+        } else {
+            DZAddressPeople * p = olderContacts[contact.identifier];
+            if (p.userID.length == 0 || !p.firend) {
+                [comingContacts addObject:p];
             }
         }
     }];
+    _fileCache.cachedDictionary = contacts;
     [self syncStatus:comingContacts];
 }
 
@@ -124,7 +147,7 @@
     }
 
     YHContactStateRequest * req = [YHContactStateRequest new];
-    NSMutableArray * array = [NSMutableArray new];
+    NSMutableArray<NSString*> * array = [NSMutableArray new];
     NSMutableDictionary * map = [NSMutableDictionary new];
     for (DZAddressPeople * people in willSyncContacts) {
         for (NSString * number in people.phoneNumbers) {
@@ -153,7 +176,7 @@
                 [changedPeople addObject:people];
             }
         }
-        [weakSelf updateWithServerModel:willSyncContacts];
+        [weakSelf updateWithServerModel:changedPeople];
         [weakSelf syncStatus:contacts];
     }];
 
@@ -162,14 +185,27 @@
 
 - (void) updateWithServerModel:(NSArray *)models
 {
-    NSMutableDictionary* dictionary= [_fileCache.lastCachedObject mutableCopy];
+    NSMutableDictionary* dictionary= [_fileCache.cachedDictionary mutableCopy];
     for(DZAddressPeople * people in models) {
         dictionary[people.identifier] = people;
     }
     _fileCache.lastCachedObject = dictionary;
+
+    NSArray * observers = _observerContainer.allDefaultObservers;
+
+    for (NSObject<DZContactsObserver>* observer in observers) {
+        if ([observer respondsToSelector:@selector(contactMonitor:receiveChangedStates:)]) {
+            [observer contactMonitor:self receiveChangedStates:models];
+        }
+    }
 }
 
 - (void)registerObserver:(id <DZContactsObserver>)observer {
     [self.observerContainer addDefaultObserver:observer];
 }
+
+- (NSArray <DZAddressPeople *>*)peoples {
+    return [_fileCache.cachedDictionary allValues];
+}
+
 @end

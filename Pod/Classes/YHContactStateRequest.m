@@ -20,6 +20,7 @@
 }
 - (NSString*) method
 {
+
     return M_QUERY_ADDESSBOOK;
 }
 
@@ -28,11 +29,11 @@
     return S_CLIENTWRAP_SERVER;
 }
 
-- (InfoWallRequest*) infoWall
+- (QueryAddressBookRequest*)query
 {
     if (!_requestData) {
-        _requestData = [InfoWallRequest new];
+        _requestData = [QueryAddressBookRequest new];
     }
-    return (InfoWallRequest*)_requestData;
+    return (QueryAddressBookRequest*)_requestData;
 }
 @end
