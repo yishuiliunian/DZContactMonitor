@@ -84,7 +84,10 @@
 }
 
 - (void)contactMonitorStartSync:(DZContactMonitor *)monitor {
-    DZAlertShowLoading(nil);
+    NSArray * allPeoples= [DZContactMonitor userMonitor].peoples;
+    if (allPeoples.count == 0) {
+        DZAlertShowLoading(nil);
+    }
 }
 
 - (void)contactMonitorEndSync:(DZContactMonitor *)monitor {

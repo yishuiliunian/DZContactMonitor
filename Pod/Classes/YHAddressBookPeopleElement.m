@@ -19,8 +19,10 @@
 #import "YHAddContactReqeust.h"
 #import "DZAuthSession.h"
 #import "YHContactsManager.h"
+#import "DZURLRoute.h"
+#import "YHURLRouteDefines.h"
 #import <MessageUI/MessageUI.h>
-
+#import "YHURLRouteDefines.h"
 @interface YHAddressBookPeopleElement () <YHCacheFetcherObsever, MFMessageComposeViewControllerDelegate>
 {
     UserProfile * _userProfile;
@@ -131,20 +133,11 @@
 
 - (void) inviteThisMan
 {
-    if (![MFMessageComposeViewController canSendText]) {
-        DZAlertHUDShowStatus(@"请配置短信，之后发送邀请");
-    } else {
-        MFMessageComposeViewController * mfm = [MFMessageComposeViewController new];
-        mfm.recipients = _people.phoneNumbers;
-        mfm.body = @"校园里面的事情都在这里，下载哟呵校园开启新生活：https://xxxxxxxxx";
-        mfm.messageComposeDelegate = self;
-        mfm.navigationController.navigationBar.titleTextAttributes  = @{
-               NSForegroundColorAttributeName : [UIColor blackColor]
-        };
-        [self.hostViewController presentViewController:mfm animated:YES completion:^{
 
-        }];
-    }
+    UIActivityViewController* activityViewController = [[UIActivityViewController alloc] initWithActivityItems:@[@"校园里面的事情都在这里，下载哟呵校园开启新生活：https://www.8mclub.com/1895/download.html"] applicationActivities:nil];
+    [self.hostViewController presentViewController:activityViewController animated:YES completion:^{
+
+    }];
 }
 
 - (void) firendWithThisMan
@@ -172,5 +165,13 @@
     [controller dismissViewControllerAnimated:YES completion:^{
 
     }];
+}
+
+- (void)handleSelectedInViewController:(UIViewController *)vc {
+    if (_people.userID.length) {
+        NSMutableDictionary* info = [NSMutableDictionary new];
+        [info setObject:_people.userID forKey:kYHURLQueryParamterUID];
+        [[DZURLRoute defaultRoute] routeURL:DZURLRouteQueryLink(kYHURLUserDetail, info)];
+    }
 }
 @end
