@@ -18,6 +18,7 @@
 #import "EKAdjustTableElement.h"
 #import "HNKCache.h"
 #import "YHImageURLAdapter.h"
+#import "YHContactsManager.h"
 
 @interface  DZContactMonitor ()
 {
@@ -132,8 +133,10 @@
             }
         } else {
             DZAddressPeople * p = olderContacts[contact.identifier];
-            if (p.userID.length == 0 || !p.firend) {
+            if (p.userID.length == 0 ) {
                 [comingContacts addObject:p];
+            } else {
+                p.firend = [[YHContactsManager shareManager] existContact:p.userID];
             }
         }
     }];
@@ -170,7 +173,6 @@
             }
         }
     }
-    [array addObject:@"13429521443"];
     req.query.mobileNoArray = array;
     req.skey = DZActiveAuthSession.token;
 
